@@ -1,0 +1,28 @@
+# Core data processing
+pandas>=1.5.0
+numpy>=1.21.0
+
+# Oil & Gas specific libraries
+lasio>=0.30.0
+segpy>=0.1.0
+dlisio>=0.3.0
+
+# Vector database
+chromadb>=0.4.0
+
+# Data visualization (optional)
+matplotlib>=3.5.0
+seaborn>=0.11.0
+plotly>=5.0.0
+
+# Machine learning (for future enhancements)
+scikit-learn>=1.1.0
+
+# Utilities
+python-dateutil>=2.8.0
+pathlib2>=2.3.0
+
+# Development and testing
+pytest>=7.0.0
+black>=22.0.0
+flake8>=5.0.0 
