@@ -67,6 +67,7 @@ tmp/
 
 # Data files (large files that shouldn't be in repo)
 data/
+data/*
 *.segy
 *.sgy
 *.dlis
