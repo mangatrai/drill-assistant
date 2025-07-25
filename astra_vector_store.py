@@ -50,8 +50,8 @@ class AstraVectorStoreSingle:
         # Initialize logging
         self.logger = logging.getLogger(self.__class__.__name__)
         
-        # Single collection name
-        self.collection_name = "oil_gas_documents"
+        # Single collection name - get from environment or use default
+        self.collection_name = os.getenv('ASTRA_DB_COLLECTION', 'oil_gas_documents')
         
         # Initialize Astra DB client
         self.client = DataAPIClient()
@@ -81,12 +81,13 @@ class AstraVectorStoreSingle:
         print("🔧 Initializing Astra DB collection with vectorize service...")
         
         try:
-            # Check if collection exists
-            try:
-                print(f"  📋 Checking if collection '{self.collection_name}' exists...")
-                collection = self.database.get_collection(self.collection_name)
+            # Check if collection exists using list_collection_names
+            print(f"  📋 Checking if collection '{self.collection_name}' exists...")
+            existing_collections = self.database.list_collection_names()
+            
+            if self.collection_name in existing_collections:
                 print(f"  ✅ Collection '{self.collection_name}' already exists")
-            except Exception as e:
+            else:
                 print(f"  📝 Collection '{self.collection_name}' doesn't exist, creating...")
                 # Collection doesn't exist, create it with vectorize service
                 collection_definition = CollectionDefinition(
@@ -94,7 +95,7 @@ class AstraVectorStoreSingle:
                         metric=VectorMetric.COSINE,
                         service=VectorServiceOptions(
                             provider="nvidia",
-                            model_name="NV-Embed-QA",
+                            model_name="nvidia/nv-embedqa-e5-v5",
                         )
                     )
                 )
@@ -333,7 +334,7 @@ class AstraVectorStoreSingle:
         """Get statistics for the collection"""
         try:
             collection = self.database.get_collection(self.collection_name)
-            count = collection.count_documents({}, upper_bound=1000)
+            count = collection.estimated_document_count()
             
             # Get document type distribution manually since aggregate might not be available
             document_types = {}

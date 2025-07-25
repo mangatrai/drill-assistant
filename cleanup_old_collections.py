@@ -1,171 +1,71 @@
 #!/usr/bin/env python3
 """
-Cleanup script to remove old multi-collection approach
-Since we've moved to single collection 'oil_gas_documents'
+Cleanup script to remove any specified Astra DB collection
 """
 
 import os
+import argparse
 from astrapy import DataAPIClient
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-def cleanup_old_collections():
-    """Remove old collections from multi-collection approach"""
-    
-    # Get credentials
+def delete_collection(collection_name: str, keyspace: str = None):
     api_endpoint = os.getenv('ASTRA_DB_API_ENDPOINT')
     token = os.getenv('ASTRA_DB_TOKEN')
-    keyspace = os.getenv('ASTRA_DB_KEYSPACE')
-    
+    env_keyspace = os.getenv('ASTRA_DB_KEYSPACE')
+
     if not api_endpoint or not token:
         print("❌ Missing Astra DB credentials in .env file")
         return
-    
-    print("🧹 Cleaning up old multi-collection approach...")
-    print(f"   API Endpoint: {api_endpoint}")
-    
-    # Old collections to remove
-    old_collections = [
-        'well_summaries',
-        'formation_analysis', 
-        'petrophysical_insights',
-        'seismic_metadata',
-        'well_trajectories',
-        'field_overview',
-        'file_metadata'
-    ]
-    
-    try:
-        # Initialize client
-        client = DataAPIClient()
-        
-        # Connect to database
-        if keyspace:
-            print(f"   Keyspace: {keyspace}")
-            database = client.get_database(api_endpoint, token=token, keyspace=keyspace)
-        else:
-            print(f"   Keyspace: (using default)")
-            database = client.get_database(api_endpoint, token=token)
-        
-        # Check which collections exist and remove them
-        collections_to_remove = []
-        
-        for collection_name in old_collections:
-            try:
-                collection = database.get_collection(collection_name)
-                print(f"   📋 Found old collection: {collection_name}")
-                collections_to_remove.append(collection_name)
-            except Exception as e:
-                print(f"   ⚠️ Collection {collection_name} not found (already removed or doesn't exist)")
-        
-        if not collections_to_remove:
-            print("   ✅ No old collections found to remove")
-            return
-        
-        # Confirm deletion
-        print(f"\n🗑️ Found {len(collections_to_remove)} old collections to remove:")
-        for coll in collections_to_remove:
-            print(f"   - {coll}")
-        
-        response = input("\n❓ Do you want to delete these collections? (yes/no): ")
-        
-        if response.lower() in ['yes', 'y']:
-            print("\n🗑️ Deleting old collections...")
-            
-            for collection_name in collections_to_remove:
-                try:
-                    collection = database.get_collection(collection_name)
-                    
-                    # Get document count before deletion
-                    count = collection.count_documents({}, upper_bound=1000)
-                    print(f"   📊 Collection '{collection_name}' has {count} documents")
-                    
-                    # Drop the collection
-                    database.drop_collection(collection_name)
-                    print(f"   ✅ Dropped collection: {collection_name}")
-                    
-                except Exception as e:
-                    print(f"   ❌ Error deleting collection '{collection_name}': {e}")
-            
-            print("\n🎉 Cleanup completed!")
-            print("   ✅ Old multi-collection approach removed")
-            print("   ✅ Single collection 'oil_gas_documents' is now the only collection")
-            print("   ✅ All old collections dropped successfully")
-            
-        else:
-            print("   ❌ Cleanup cancelled")
-    
-    except Exception as e:
-        print(f"❌ Error during cleanup: {e}")
 
-def verify_single_collection():
-    """Verify that only the single collection exists"""
-    
-    api_endpoint = os.getenv('ASTRA_DB_API_ENDPOINT')
-    token = os.getenv('ASTRA_DB_TOKEN')
-    keyspace = os.getenv('ASTRA_DB_KEYSPACE')
-    
+    if not collection_name:
+        print("❌ Collection name must be provided.")
+        return
+
+    if not keyspace:
+        if env_keyspace:
+            keyspace = env_keyspace
+            print(f"ℹ️  Using keyspace from .env: {keyspace}")
+        else:
+            print("❌ Keyspace must be provided via --keyspace or in .env file.")
+            return
+
+    print(f"🧹 Preparing to delete collection '{collection_name}' from keyspace '{keyspace}'...")
+    print(f"   API Endpoint: {api_endpoint}")
+
     try:
         client = DataAPIClient()
-        
-        if keyspace:
-            database = client.get_database(api_endpoint, token=token, keyspace=keyspace)
-        else:
-            database = client.get_database(api_endpoint, token=token)
-        
-        # Check for the single collection
+        database = client.get_database(api_endpoint, token=token, keyspace=keyspace)
         try:
-            collection = database.get_collection("oil_gas_documents")
-            count = collection.count_documents({}, upper_bound=1000)
-            print(f"✅ Single collection 'oil_gas_documents' exists with {count} documents")
+            collection = database.get_collection(collection_name)
+            count = collection.estimated_document_count()
+            print(f"   📋 Collection '{collection_name}' exists and has {count} documents.")
         except Exception as e:
-            print(f"❌ Single collection 'oil_gas_documents' not found: {e}")
-        
-        # Check for any remaining old collections
-        old_collections = [
-            'well_summaries', 'formation_analysis', 'petrophysical_insights',
-            'seismic_metadata', 'well_trajectories', 'field_overview', 'file_metadata'
-        ]
-        
-        remaining_old = []
-        for coll_name in old_collections:
-            try:
-                database.get_collection(coll_name)
-                remaining_old.append(coll_name)
-            except:
-                pass
-        
-        if remaining_old:
-            print(f"⚠️ Found {len(remaining_old)} old collections still exist:")
-            for coll in remaining_old:
-                print(f"   - {coll}")
-        else:
-            print("✅ No old collections remain")
-            
+            print(f"❌ Collection '{collection_name}' not found in keyspace '{keyspace}'.")
+            return
+
+        response = input(f"\n❓ Are you sure you want to delete collection '{collection_name}'? (yes/no): ")
+        if response.lower() not in ['yes', 'y']:
+            print("   ❌ Cleanup cancelled.")
+            return
+
+        try:
+            database.drop_collection(collection_name)
+            print(f"   ✅ Dropped collection: {collection_name}")
+            print("\n🎉 Cleanup completed!")
+        except Exception as e:
+            print(f"❌ Error deleting collection '{collection_name}': {e}")
     except Exception as e:
-        print(f"❌ Error verifying collections: {e}")
+        print(f"❌ Error connecting to Astra DB: {e}")
 
 def main():
-    """Main cleanup function"""
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="Cleanup old multi-collection approach")
-    parser.add_argument("--verify", action="store_true", help="Verify current collection state")
-    parser.add_argument("--cleanup", action="store_true", help="Remove old collections")
-    
+    parser = argparse.ArgumentParser(description="Delete any Astra DB collection by name.")
+    parser.add_argument('--collection', required=True, help='Name of the collection to delete')
+    parser.add_argument('--keyspace', help='Keyspace name (optional, will use .env if not provided)')
     args = parser.parse_args()
-    
-    if args.verify:
-        print("🔍 Verifying collection state...")
-        verify_single_collection()
-    elif args.cleanup:
-        cleanup_old_collections()
-    else:
-        print("Usage:")
-        print("  python cleanup_old_collections.py --verify    # Check current state")
-        print("  python cleanup_old_collections.py --cleanup   # Remove old collections")
+    delete_collection(args.collection, args.keyspace)
 
 if __name__ == "__main__":
     main() 

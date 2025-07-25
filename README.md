@@ -1,57 +1,82 @@
 # Oil & Gas Data Processing Pipeline
 
-A comprehensive **modular data processing and vectorization pipeline** for oil & gas exploration data, designed to support generative AI agentic workflows.
+A comprehensive **modular data processing and vectorization pipeline** for oil & gas exploration data, designed to support generative AI agentic workflows with DataStax Astra DB.
 
 ## 🎯 Overview
 
 This project provides a complete solution for parsing, contextualizing, and vectorizing oil & gas exploration data from the Volve field. It transforms raw data files into structured, searchable documents that can be used by AI agents for intelligent Q&A and analysis.
 
-**🆕 NEW: Modular Parser Architecture** - Based on real data analysis with robust, maintainable design.
+**🆕 NEW: Astra DB Integration** - Single collection approach with built-in vectorize service
+**🆕 NEW: Unstructured SDK Integration** - Intelligent document parsing and chunking
+**🆕 NEW: Modular Parser Architecture** - Based on real data analysis with robust, maintainable design
 
 ## 📊 Data Types Supported
 
 - **SEG-Y Files**: 3D seismic reflection data (870MB each)
 - **DLIS Files**: Digital Log Interchange Standard (well logs)
-- **LAS Files**: Log ASCII Standard (well logs with permeability data)
-- **ASCII Files**: Petrophysical info with header metadata
-- **PDF Files**: Reports and documentation
-- **Excel Files**: Facies and tabular data
-- **Text Files**: Content descriptions
-- **DAT Files**: Formation picks
+- **LAS Files**: Log ASCII Standard (well logs with permeability data) - *Handled by Unstructured SDK*
+- **ASCII Files**: Petrophysical info with header metadata - *Handled by Unstructured SDK*
+- **PDF Files**: Reports and documentation - *Handled by Unstructured SDK*
+- **Excel Files**: Facies and tabular data - *Handled by Unstructured SDK*
+- **Text Files**: Content descriptions - *Handled by Unstructured SDK*
+- **DAT Files**: Formation picks - *Handled by Unstructured SDK*
+- **Images**: PNG, JPG, TIFF, BMP - *Handled by Unstructured SDK*
 
 ## 🏗️ Architecture
 
 ```
-Raw Data Files → Modular Parser → Contextual Documents → Vector Store → Query Engine
+Raw Data Files → Modular Parser → Contextual Documents → Astra DB → Query Engine
      ↓              ↓                    ↓                ↓              ↓
-  SEG-Y, DLIS   ParsedData          Rich Context    ChromaDB      AI Agent
-  LAS, ASCII    Objects            Documents       Collections   Interface
+  SEG-Y, DLIS   ParsedData          Rich Context    Single Collection  AI Agent
+  LAS, ASCII    Objects            Documents       with Vectorize      Interface
+  PDF, Excel    (Direct Context)   (Direct Output) Service
 ```
 
 ## 🚀 Quick Start
 
-### 1. Installation
+### 1. Environment Setup
+
+Create a `.env` file in the project root:
+
+```bash
+# Astra DB Configuration
+ASTRA_DB_API_ENDPOINT=your_api_endpoint_here
+ASTRA_DB_TOKEN=your_application_token_here
+ASTRA_DB_KEYSPACE=your_keyspace_name
+ASTRA_DB_COLLECTION=your_collection_name
+
+```
+
+### 2. Installation
 
 ```bash
 # Clone the repository
 git clone <your-repo-url>
 cd drill-assistant
 
-# Set up virtual environment (recommended)
-source activate_env.sh
+# Set up Python virtual environment (recommended: use uv)
+uv venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install dependencies
-pip install -r requirements.txt
+uv pip install -r requirements.txt
+
+# Install system dependencies for Unstructured SDK
+brew install poppler tesseract  # macOS
+# sudo apt-get install poppler-utils tesseract-ocr  # Ubuntu/Debian
 ```
 
-### 2. Data Setup
+### 3. Data Setup
 
 Ensure your oil & gas data is in the `data/` directory. The system automatically discovers and processes all supported file types.
 
-### 3. Run the Pipeline
+### 4. Run the Pipeline
 
 ```bash
-# Run oil & gas parser (Phase 2)
+# Analyze file structure first
+python file_structure_analyzer.py data
+
+# Run oil & gas parser
 python oil_gas_parser.py data
 
 # Run with custom output directory
@@ -61,19 +86,32 @@ python oil_gas_parser.py data --output my_parsed_data
 python oil_gas_parser.py data --verbose
 ```
 
+### 5. Load Data to Astra DB
+
+```bash
+# Load contextual documents to Astra DB
+python astra_vector_store.py --load-documents
+
+# Test queries
+python astra_vector_store.py --query "What is the maximum inclination of well F-12?"
+python astra_vector_store.py --query "Tell me about the Hugin Formation" --well "15_9-F-11"
+```
+
 ## 📁 Generated Files
 
-After running the modular parser, you'll get:
+After running the oil_gas parser, you'll get:
 
 - `parsed_data/parsing_results_YYYYMMDD_HHMMSS.json`: Detailed parsing results
 - `parsed_data/parsing_summary_YYYYMMDD_HHMMSS.json`: Summary statistics
 - `parsed_data/contextual_documents_YYYYMMDD_HHMMSS.json`: Contextual documents for vector storage
+- `file_analysis_report.json`: Comprehensive file structure analysis
+- `file_analysis_summary.json`: Summary of file types and sizes
 
 ## 🔧 Core Components
 
 ### 1. Oil & Gas Parser (`oil_gas_parser.py`)
 
-**NEW**: Modular parser system with factory pattern:
+**NEW**: Modular parser system with factory pattern and direct contextual document generation:
 
 ```python
 from oil_gas_parser import ModularDataParser
@@ -86,9 +124,10 @@ summary = parser.parse_all_data()
 - **Extension-based parsing** (no more fragile regex)
 - **Real data structures** (based on actual file analysis)
 - **Modular design** (each parser is independent)
+- **Direct contextual document generation** (no separate context processor)
+- **Unstructured SDK integration** for general document types
 - **Comprehensive error handling**
 - **Performance metrics** and statistics
-- **88.9% success rate** on real data
 
 ### 2. Parser Factory (`parsers/parser_factory.py`)
 
@@ -103,33 +142,18 @@ result = parser.parse()
 ```
 
 **Available Parsers:**
-- `UnstructuredParser`: Universal document parser (PDF, Excel, Word, Images, etc.)
-- `DlisParser`: Digital log data
-- `SegyParser`: Seismic data
+- `UnstructuredParser`: Universal document parser (PDF, Excel, Word, Images, LAS, ASCII, DAT, etc.)
+- `DlisParser`: Digital log data (custom parser)
+- `SegyParser`: Seismic data (custom parser)
 
-### 3. Context Processor (`context_processor.py`)
+**Parser Priority:**
+1. **Priority Parsers**: Custom parsers for industry-specific formats (DLIS, SEG-Y)
+2. **Extension Mapping**: File extensions mapped to UnstructuredParser
+3. **Fallback**: UnstructuredParser for unknown extensions
 
-**⚠️ REVIEW NEEDED**: May need updates for new `ParsedData` format
+### 3. Astra Vector Store (`astra_vector_store.py`)
 
-Transforms parsed data into meaningful documents:
-
-```python
-from context_processor import OilGasContextProcessor
-
-processor = OilGasContextProcessor(parsed_data)
-documents = processor.process_all_data()
-```
-
-**Document Types:**
-- Well summaries and trajectories
-- Formation analysis
-- Petrophysical insights
-- Seismic metadata
-- Field overview
-
-### 4. Astra Vector Store (`astra_vector_store.py`)
-
-Astra DB-based vector storage with intelligent querying:
+**NEW**: Astra DB-based vector storage with single collection approach:
 
 ```python
 from astra_vector_store import AstraVectorStoreSingle, AstraQueryEngineSingle
@@ -142,11 +166,35 @@ result = query_engine.query("What is the maximum inclination of well F-12?")
 ```
 
 **Features:**
-- Single collection with rich metadata
-- Built-in vectorize service (NVIDIA embeddings)
-- Semantic search capabilities
-- Well-specific filtering
-- `field_data`: Field overview
+- **Single collection** with rich metadata and tags
+- **Built-in vectorize service** (NVIDIA NV-Embed-QA model)
+- **Automatic collection creation** if it doesn't exist
+- **Semantic search capabilities** using `$vectorize` operator
+- **Well-specific filtering**
+- **Cross-document type queries**
+- **Configurable collection name** via environment variables
+
+### 4. File Structure Analyzer (`file_structure_analyzer.py`)
+
+Analyzes the actual file structure in your data directory:
+
+```bash
+python file_structure_analyzer.py data
+```
+
+**Output:**
+- Comprehensive file type analysis
+- Size and count statistics
+- Parser recommendations
+- Data quality assessment
+
+### 5. Cleanup Utility (`cleanup_old_collections.py`)
+
+Utility to delete any Astra DB collection:
+
+```bash
+python cleanup_old_collections.py --collection my_collection_name [--keyspace my_keyspace]
+```
 
 ## 🔍 Query Examples
 
@@ -198,158 +246,33 @@ result = query_engine.query("What migration algorithm was used?")
 result = query_engine.query("How can I interpret the seismic data?")
 ```
 
-### Field Overview
+### Cross-Document Queries
 ```python
-# Field statistics
-result = query_engine.query("What is the total number of wells in the field?")
+# Query across multiple document types
+result = query_engine.query("What is the relationship between seismic data and well logs?")
 
-# Data quality
-result = query_engine.query("What data quality assessment is available?")
-
-# Field characteristics
-result = query_engine.query("Tell me about the Volve field")
-```
-
-## 🤖 AI Agent Integration
-
-### Basic Integration
-
-```python
-from astra_vector_store import AstraVectorStoreSingle, AstraQueryEngineSingle
-
-class OilGasAIAgent:
-    def __init__(self):
-        self.vector_store = AstraVectorStoreSingle()
-        self.query_engine = AstraQueryEngineSingle(self.vector_store)
-    
-    def answer_question(self, question: str) -> str:
-        """Answer questions about oil & gas data"""
-        result = self.query_engine.query(question)
-        
-        # Format response for AI agent
-        response = f"Query Type: {result['query_type']}\n"
-        response += f"Results: {result['summary']}\n\n"
-        
-        # Add relevant content
-        if 'results' in result:
-            if isinstance(result['results'], dict):
-                for collection, results_list in result['results'].items():
-                    if results_list:
-                        response += f"{collection.upper()}:\n"
-                        for res in results_list[:2]:
-                            response += f"- {res['content'][:300]}...\n"
-            else:
-                for res in result['results'][:3]:
-                    response += f"- {res['content'][:300]}...\n"
-        
-        return response
-
-# Usage
-agent = OilGasAIAgent()
-answer = agent.answer_question("What is the reservoir formation in Volve field?")
-print(answer)
-```
-
-### Advanced Integration with LLM
-
-```python
-from langchain.llms import OpenAI
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
-
-class AdvancedOilGasAgent:
-    def __init__(self, openai_api_key: str):
-        self.vector_store = OilGasVectorStore()
-        self.query_engine = OilGasQueryEngine(self.vector_store)
-        
-        # Initialize LLM
-        self.llm = OpenAI(api_key=openai_api_key, temperature=0.1)
-        
-        # Create prompt template
-        self.prompt = PromptTemplate(
-            input_variables=["question", "context"],
-            template="""
-            You are an expert oil & gas geoscientist. Answer the following question based on the provided context.
-            
-            Question: {question}
-            
-            Context: {context}
-            
-            Provide a comprehensive, professional answer:
-            """
-        )
-        
-        self.chain = LLMChain(llm=self.llm, prompt=self.prompt)
-    
-    def answer_question(self, question: str) -> str:
-        # Get relevant context from vector store
-        result = self.query_engine.query(question, max_results=5)
-        
-        # Extract context
-        context = ""
-        if 'results' in result:
-            if isinstance(result['results'], dict):
-                for collection, results_list in result['results'].items():
-                    if results_list:
-                        context += f"\n{collection.upper()}:\n"
-                        for res in results_list:
-                            context += f"{res['content']}\n"
-            else:
-                for res in result['results']:
-                    context += f"{res['content']}\n"
-        
-        # Generate answer using LLM
-        response = self.chain.run(question=question, context=context)
-        return response
+# Well-specific comprehensive analysis
+result = query_engine.query_cross_reference("Analyze well F-11", "15_9-F-11")
 ```
 
 ## 📈 Data Quality Assessment
 
 The pipeline provides comprehensive data quality metrics:
 
-- **Well Coverage**: Number of wells with different data types
+- **File Structure Analysis**: Complete breakdown of file types and sizes
+- **Parser Success Rates**: Performance metrics for each parser type
 - **Data Completeness**: Missing vs. available data
-- **File Size Analysis**: Large files that may need special handling
 - **Format Validation**: Ensures data integrity
+- **Collection Statistics**: Document counts and type distribution
 
-## 🔧 Customization
+## 🔧 Environment Variables
 
-### Adding New File Formats
-
-1. Extend `OilGasDataParser` class
-2. Add parsing method for new format
-3. Update data structures as needed
-
-### Custom Document Types
-
-1. Extend `OilGasContextProcessor` class
-2. Add new document processing method
-3. Update vector store collections
-
-### Query Enhancements
-
-1. Extend `OilGasQueryEngine` class
-2. Add new query classification rules
-3. Implement specialized query handlers
-
-## 🧪 Testing
-
-```bash
-# Run tests
-pytest
-
-# Test specific components
-python -m pytest tests/test_data_parser.py
-python -m pytest tests/test_context_processor.py
-python -m pytest tests/test_vector_store.py
-```
-
-## 📊 Performance
-
-- **Parsing Speed**: ~1000 files/minute
-- **Vector Store**: Sub-second query response
-- **Memory Usage**: Efficient streaming for large files
-- **Scalability**: Supports datasets with 1000+ wells
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ASTRA_DB_API_ENDPOINT` | Astra DB API endpoint | Required |
+| `ASTRA_DB_TOKEN` | Astra DB application token | Required |
+| `ASTRA_DB_KEYSPACE` | Astra DB keyspace name | Optional |
+| `ASTRA_DB_COLLECTION` | Collection name | `oil_gas_documents` |
 
 ## 🤝 Contributing
 
@@ -358,14 +281,10 @@ python -m pytest tests/test_vector_store.py
 3. Add tests for new functionality
 4. Submit a pull request
 
-## 📄 License
-
-MIT License - see LICENSE file for details
-
 ## 🙏 Acknowledgments
 
-- Volve field data provided by Equinor
-- ChromaDB for vector storage
+- DataStax Astra DB for vector storage
+- Unstructured SDK for intelligent document parsing
 - Open source oil & gas libraries
 
 ## 📞 Support
@@ -377,4 +296,4 @@ For questions and support:
 
 ---
 
-**Ready to build intelligent oil & gas AI agents! 🚀**
+**Ready to build intelligent oil & gas AI agents with Astra DB! 🚀**
