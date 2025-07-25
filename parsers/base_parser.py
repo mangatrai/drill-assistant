@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 import logging
+from datetime import datetime
 
 @dataclass
 class ParsedData:
@@ -19,6 +20,15 @@ class ParsedData:
     data: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     processing_time: Optional[float] = None
+
+@dataclass
+class ContextualDocument:
+    """Structured document for vector storage"""
+    content: str
+    metadata: Dict[str, Any]
+    document_type: str
+    source: str
+    timestamp: str
 
 class BaseParser(ABC):
     """Abstract base class for all parsers"""
@@ -36,6 +46,21 @@ class BaseParser(ABC):
     def parse(self) -> ParsedData:
         """Parse the file and return structured data"""
         pass
+        
+    def generate_contextual_documents(self) -> List[ContextualDocument]:
+        """Generate contextual documents from parsed data - default implementation"""
+        parsed_data = self.parse()
+        if parsed_data.error:
+            return []
+            
+        # Default implementation: create a single contextual document
+        return [ContextualDocument(
+            content=str(parsed_data.data) if parsed_data.data else "",
+            metadata=parsed_data.metadata,
+            document_type=parsed_data.file_type,
+            source=parsed_data.file_path,
+            timestamp=datetime.now().isoformat()
+        )]
         
     def validate_file(self) -> bool:
         """Basic file validation"""

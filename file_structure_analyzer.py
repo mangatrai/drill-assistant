@@ -1031,14 +1031,14 @@ class DataStructureAnalyzer:
         for ext, analysis in self.analysis_results.items():
             if ext == 'ascii':
                 suggestions['parser_implementations']['ascii'] = {
-                    'class_name': 'AsciiParser',
+                    'class_name': 'UnstructuredParser',  # Now handles ASCII files
                     'methods': ['parse_header', 'parse_data', 'extract_columns'],
                     'dependencies': ['pandas', 're'],
                     'complexity': 'medium'
                 }
             elif ext == 'las':
                 suggestions['parser_implementations']['las'] = {
-                    'class_name': 'LasParser',
+                    'class_name': 'UnstructuredParser',  # Now handles LAS files
                     'methods': ['parse_well_info', 'parse_curves', 'extract_data'],
                     'dependencies': ['lasio'],
                     'complexity': 'low'
@@ -1059,14 +1059,14 @@ class DataStructureAnalyzer:
                 }
             elif ext == 'pdf':
                 suggestions['parser_implementations']['pdf'] = {
-                    'class_name': 'PdfParser',
+                    'class_name': 'UnstructuredParser',
                     'methods': ['extract_text', 'extract_tables', 'classify_content'],
                     'dependencies': ['PyPDF2', 'pdfplumber'],
                     'complexity': 'medium'
                 }
             elif ext == 'excel':
                 suggestions['parser_implementations']['excel'] = {
-                    'class_name': 'ExcelParser',
+                    'class_name': 'UnstructuredParser',
                     'methods': ['parse_sheets', 'extract_data', 'identify_sheet_types'],
                     'dependencies': ['openpyxl', 'pandas'],
                     'complexity': 'low'
@@ -1086,9 +1086,9 @@ class DataStructureAnalyzer:
             '.dlis': 'dlis_parser',
             '.segy': 'segy_parser',
             '.sgy': 'segy_parser',
-            '.pdf': 'pdf_parser',
-            '.xlsx': 'excel_parser',
-            '.xls': 'excel_parser',
+            '.pdf': 'unstructured_parser',
+            '.xlsx': 'unstructured_parser',
+            '.xls': 'unstructured_parser',
             '.png': 'image_parser',
             '.jpg': 'image_parser',
             '.jpeg': 'image_parser',
@@ -1112,7 +1112,7 @@ class DataStructureAnalyzer:
         print("💾 Saving analysis results...")
         
         # Save full report
-        with open('data_analysis_report.json', 'w') as f:
+        with open('file_analysis_report.json', 'w') as f:
             json.dump(report, f, indent=2, default=str)
         
         # Save summary
@@ -1125,12 +1125,12 @@ class DataStructureAnalyzer:
             'priority_parsers': report['recommendations']['priority_parsers'][:5]
         }
         
-        with open('data_analysis_summary.json', 'w') as f:
+        with open('file_analysis_summary.json', 'w') as f:
             json.dump(summary, f, indent=2, default=str)
         
         print("✅ Analysis results saved to:")
-        print("   - data_analysis_report.json (full report)")
-        print("   - data_analysis_summary.json (summary)")
+        print("   - file_analysis_report.json (full report)")
+        print("   - file_analysis_summary.json (summary)")
 
 if __name__ == "__main__":
     # Run the analysis

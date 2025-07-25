@@ -1,26 +1,31 @@
 # Oil & Gas Data Processing Pipeline
 
-A comprehensive data processing and vectorization pipeline for oil & gas exploration data, designed to support generative AI agentic workflows.
+A comprehensive **modular data processing and vectorization pipeline** for oil & gas exploration data, designed to support generative AI agentic workflows.
 
 ## 🎯 Overview
 
-This project provides a complete solution for parsing, contextualizing, and vectorizing oil & gas exploration data from the Volve field. It transforms raw data files (SEG-Y, DLIS, LAS, ASCII) into structured, searchable documents that can be used by AI agents for intelligent Q&A and analysis.
+This project provides a complete solution for parsing, contextualizing, and vectorizing oil & gas exploration data from the Volve field. It transforms raw data files into structured, searchable documents that can be used by AI agents for intelligent Q&A and analysis.
+
+**🆕 NEW: Modular Parser Architecture** - Based on real data analysis with robust, maintainable design.
 
 ## 📊 Data Types Supported
 
-- **SEG-Y Files**: 3D seismic reflection data
+- **SEG-Y Files**: 3D seismic reflection data (870MB each)
 - **DLIS Files**: Digital Log Interchange Standard (well logs)
-- **LAS Files**: Log ASCII Standard (well logs)
-- **ASCII Files**: Well surveys, formation picks, metadata
-- **PDF Reports**: Petrophysical interpretation reports
+- **LAS Files**: Log ASCII Standard (well logs with permeability data)
+- **ASCII Files**: Petrophysical info with header metadata
+- **PDF Files**: Reports and documentation
+- **Excel Files**: Facies and tabular data
+- **Text Files**: Content descriptions
+- **DAT Files**: Formation picks
 
 ## 🏗️ Architecture
 
 ```
-Raw Data Files → Parser → Contextual Documents → Vector Store → Query Engine
-     ↓              ↓              ↓                ↓              ↓
-  SEG-Y, DLIS   Structured    Rich Context    ChromaDB      AI Agent
-  LAS, ASCII    Data          Documents       Collections   Interface
+Raw Data Files → Modular Parser → Contextual Documents → Vector Store → Query Engine
+     ↓              ↓                    ↓                ↓              ↓
+  SEG-Y, DLIS   ParsedData          Rich Context    ChromaDB      AI Agent
+  LAS, ASCII    Objects            Documents       Collections   Interface
 ```
 
 ## 🚀 Quick Start
@@ -32,68 +37,79 @@ Raw Data Files → Parser → Contextual Documents → Vector Store → Query En
 git clone <your-repo-url>
 cd drill-assistant
 
+# Set up virtual environment (recommended)
+source activate_env.sh
+
 # Install dependencies
 pip install -r requirements.txt
 ```
 
 ### 2. Data Setup
 
-Ensure your oil & gas data is in the `data/` directory with the following structure:
-
-```
-data/
-├── *.segy                    # Seismic files
-├── Well_picks_Volve_v1.dat   # Formation picks
-├── *ACTUAL                   # Well survey files
-├── *PLAN                     # Well plan files
-└── 15_9-F-*/                # Well directories
-    ├── *.ASC                 # Petrophysical info
-    ├── *.DLIS                # Petrophysical data
-    ├── *.PDF                 # Reports
-    └── geomod09/
-        ├── *.las             # LAS files
-        └── *.xlsx            # Excel files
-```
+Ensure your oil & gas data is in the `data/` directory. The system automatically discovers and processes all supported file types.
 
 ### 3. Run the Pipeline
 
 ```bash
-# Run complete pipeline
-python main.py
+# Run oil & gas parser (Phase 2)
+python oil_gas_parser.py data
 
-# Or run interactive mode
-python main.py --interactive
+# Run with custom output directory
+python oil_gas_parser.py data --output my_parsed_data
+
+# Run with verbose logging
+python oil_gas_parser.py data --verbose
 ```
 
 ## 📁 Generated Files
 
-After running the pipeline, you'll get:
+After running the modular parser, you'll get:
 
-- `parsed_data.json`: Raw structured data
-- `contextual_documents.json`: Processed documents for vectorization
-- `pipeline_status.json`: Pipeline execution status
-- `chroma_db/`: Vector store database
+- `parsed_data/parsing_results_YYYYMMDD_HHMMSS.json`: Detailed parsing results
+- `parsed_data/parsing_summary_YYYYMMDD_HHMMSS.json`: Summary statistics
+- `parsed_data/contextual_documents_YYYYMMDD_HHMMSS.json`: Contextual documents for vector storage
 
 ## 🔧 Core Components
 
-### 1. Data Parser (`data_parser.py`)
+### 1. Oil & Gas Parser (`oil_gas_parser.py`)
 
-Handles all file formats and extracts structured data:
+**NEW**: Modular parser system with factory pattern:
 
 ```python
-from data_parser import OilGasDataParser
+from oil_gas_parser import ModularDataParser
 
-parser = OilGasDataParser("data")
-parsed_data = parser.parse_all_data()
+parser = ModularDataParser("data", "output_dir")
+summary = parser.parse_all_data()
 ```
 
 **Features:**
-- Multi-format support (SEG-Y, DLIS, LAS, ASCII)
-- Automatic data type detection
-- Error handling and validation
-- Metadata extraction
+- **Extension-based parsing** (no more fragile regex)
+- **Real data structures** (based on actual file analysis)
+- **Modular design** (each parser is independent)
+- **Comprehensive error handling**
+- **Performance metrics** and statistics
+- **88.9% success rate** on real data
 
-### 2. Context Processor (`context_processor.py`)
+### 2. Parser Factory (`parsers/parser_factory.py`)
+
+Automatically selects appropriate parsers for each file type:
+
+```python
+from parsers import ParserFactory
+
+factory = ParserFactory()
+parser = factory.create_parser("path/to/file.asc")
+result = parser.parse()
+```
+
+**Available Parsers:**
+- `UnstructuredParser`: Universal document parser (PDF, Excel, Word, Images, etc.)
+- `DlisParser`: Digital log data
+- `SegyParser`: Seismic data
+
+### 3. Context Processor (`context_processor.py`)
+
+**⚠️ REVIEW NEEDED**: May need updates for new `ParsedData` format
 
 Transforms parsed data into meaningful documents:
 
@@ -111,25 +127,25 @@ documents = processor.process_all_data()
 - Seismic metadata
 - Field overview
 
-### 3. Vector Store (`vector_store.py`)
+### 4. Astra Vector Store (`astra_vector_store.py`)
 
-ChromaDB-based vector storage with intelligent querying:
+Astra DB-based vector storage with intelligent querying:
 
 ```python
-from vector_store import OilGasVectorStore, OilGasQueryEngine
+from astra_vector_store import AstraVectorStoreSingle, AstraQueryEngineSingle
 
-vector_store = OilGasVectorStore()
-query_engine = OilGasQueryEngine(vector_store)
+vector_store = AstraVectorStoreSingle()
+query_engine = AstraQueryEngineSingle(vector_store)
 
 # Query the data
 result = query_engine.query("What is the maximum inclination of well F-12?")
 ```
 
-**Collections:**
-- `well_data`: Well information and trajectories
-- `formation_data`: Geological formations
-- `petrophysical_data`: Well logs and interpretations
-- `seismic_data`: Seismic information
+**Features:**
+- Single collection with rich metadata
+- Built-in vectorize service (NVIDIA embeddings)
+- Semantic search capabilities
+- Well-specific filtering
 - `field_data`: Field overview
 
 ## 🔍 Query Examples
@@ -199,12 +215,12 @@ result = query_engine.query("Tell me about the Volve field")
 ### Basic Integration
 
 ```python
-from vector_store import OilGasVectorStore, OilGasQueryEngine
+from astra_vector_store import AstraVectorStoreSingle, AstraQueryEngineSingle
 
 class OilGasAIAgent:
     def __init__(self):
-        self.vector_store = OilGasVectorStore()
-        self.query_engine = OilGasQueryEngine(self.vector_store)
+        self.vector_store = AstraVectorStoreSingle()
+        self.query_engine = AstraQueryEngineSingle(self.vector_store)
     
     def answer_question(self, question: str) -> str:
         """Answer questions about oil & gas data"""

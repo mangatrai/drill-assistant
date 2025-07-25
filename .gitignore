@@ -82,8 +82,8 @@ contextual_documents.json
 parsed_data.json
 
 # Analysis outputs (can be regenerated)
-data_analysis_report.json
-data_analysis_summary.json
+file_analysis_report.json
+file_analysis_summary.json
 
 # Database files
 *.db

@@ -13,7 +13,7 @@ import time
 from datetime import datetime
 
 from parsers import ParserFactory
-from parsers.base_parser import ParsedData
+from parsers.base_parser import ParsedData, ContextualDocument
 
 class ModularDataParser:
     """Main parser class using modular architecture"""
@@ -32,6 +32,7 @@ class ModularDataParser:
         
         # Results storage
         self.parsed_results = []
+        self.contextual_documents = []
         self.parser_stats = defaultdict(int)
         self.error_files = []
         
@@ -50,7 +51,7 @@ class ModularDataParser:
         all_files = self._discover_files()
         self.logger.info(f"📋 Found {len(all_files)} files to process")
         
-        # Parse each file
+        # Parse each file and generate contextual documents
         for file_path in all_files:
             self._parse_single_file(file_path)
         
@@ -59,6 +60,9 @@ class ModularDataParser:
         
         # Save results
         self._save_results(summary)
+        
+        # Save contextual documents
+        self._save_contextual_documents()
         
         return summary
     
@@ -105,7 +109,7 @@ class ModularDataParser:
                 })
                 return
             
-            # Parse the file
+            # Parse the file and generate contextual documents
             result = parser.parse()
             
             # Store result
@@ -121,6 +125,11 @@ class ModularDataParser:
                 })
             else:
                 self.logger.info(f"✅ Successfully parsed {file_path.name} with {result.parser_name}")
+                
+                # Generate contextual documents
+                contextual_docs = parser.generate_contextual_documents()
+                self.contextual_documents.extend(contextual_docs)
+                self.logger.info(f"📄 Generated {len(contextual_docs)} contextual documents from {file_path.name}")
                 
         except Exception as e:
             self.logger.error(f"❌ Unexpected error parsing {file_path.name}: {e}")
@@ -156,7 +165,11 @@ class ModularDataParser:
             'average_time_per_file': total_time / (successful + failed) if (successful + failed) > 0 else 0,
             'file_type_breakdown': dict(file_type_stats),
             'parser_usage': parser_stats,
-            'error_summary': self._summarize_errors()
+            'error_summary': self._summarize_errors(),
+            'contextual_documents': {
+                'total_documents': len(self.contextual_documents),
+                'document_types': self._count_document_types()
+            }
         }
         
         return summary
@@ -173,6 +186,13 @@ class ModularDataParser:
             else:
                 error_types['other'] += 1
         return dict(error_types)
+    
+    def _count_document_types(self) -> Dict[str, int]:
+        """Count contextual documents by type"""
+        doc_types = defaultdict(int)
+        for doc in self.contextual_documents:
+            doc_types[doc.document_type] += 1
+        return dict(doc_types)
     
     def _save_results(self, summary: Dict[str, Any]):
         """Save parsing results to files"""
@@ -195,6 +215,32 @@ class ModularDataParser:
         self.logger.info(f"💾 Results saved to:")
         self.logger.info(f"   📄 Detailed: {results_file}")
         self.logger.info(f"   📊 Summary: {summary_file}")
+    
+    def _save_contextual_documents(self):
+        """Save contextual documents to file"""
+        if not self.contextual_documents:
+            self.logger.info("📄 No contextual documents to save")
+            return
+            
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        documents_file = self.output_dir / f"contextual_documents_{timestamp}.json"
+        
+        # Serialize contextual documents
+        serialized_docs = []
+        for doc in self.contextual_documents:
+            serialized_docs.append({
+                'content': doc.content,
+                'metadata': doc.metadata,
+                'document_type': doc.document_type,
+                'source': doc.source,
+                'timestamp': doc.timestamp
+            })
+        
+        with open(documents_file, 'w') as f:
+            json.dump(serialized_docs, f, indent=2, default=str)
+        
+        self.logger.info(f"📄 Contextual documents saved to: {documents_file}")
+        self.logger.info(f"📊 Total contextual documents: {len(self.contextual_documents)}")
     
     def _serialize_result(self, result: ParsedData) -> Dict[str, Any]:
         """Serialize ParsedData object for JSON output"""
