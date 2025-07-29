@@ -11,6 +11,9 @@ from typing import Dict, List, Any, Optional
 from collections import defaultdict
 import time
 from datetime import datetime
+import concurrent.futures
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from parsers import ParserFactory
 from parsers.base_parser import ParsedData, ContextualDocument
@@ -40,10 +43,10 @@ class ModularDataParser:
         self.output_dir.mkdir(exist_ok=True)
         
     def parse_all_data(self) -> Dict[str, Any]:
-        """Parse all data files using modular parser system"""
+        """Parse all data files using modular parser system with parallel processing"""
         start_time = time.time()
         
-        self.logger.info("🚀 Starting modular data parsing...")
+        self.logger.info("🚀 Starting modular data parsing with parallel processing...")
         self.logger.info(f"📁 Data path: {self.data_path}")
         self.logger.info(f"📊 Output directory: {self.output_dir}")
         
@@ -51,9 +54,15 @@ class ModularDataParser:
         all_files = self._discover_files()
         self.logger.info(f"📋 Found {len(all_files)} files to process")
         
-        # Parse each file and generate contextual documents
-        for file_path in all_files:
-            self._parse_single_file(file_path)
+        # Initialize thread-safe data structures
+        self._init_thread_safe_structures()
+        
+        # Determine optimal number of workers based on file types
+        max_workers = self._calculate_optimal_workers(all_files)
+        self.logger.info(f"🔧 Using {max_workers} parallel workers")
+        
+        # Process files in parallel
+        self._parse_files_parallel(all_files, max_workers)
         
         # Generate summary
         summary = self._generate_summary(start_time)
@@ -80,7 +89,7 @@ class ModularDataParser:
                 files.append(file_path)
         
         # Sort by priority (based on analysis findings)
-        priority_order = ['.asc', '.dlis', '.pdf', '', '.xlsx', '.las', '.txt', '.dat', '.segy']
+        priority_order = ['.asc', '.dlis', '.pdf', '', '.xlsx', '.las', '.txt', '.dat', '.segy', '.csv']
         
         def get_priority(file_path):
             ext = file_path.suffix.lower()
@@ -93,8 +102,133 @@ class ModularDataParser:
         
         return files
     
+    def _init_thread_safe_structures(self):
+        """Initialize thread-safe data structures for parallel processing"""
+        self.parsed_results = []
+        self.contextual_documents = []
+        self.parser_stats = defaultdict(int)
+        self.error_files = []
+        
+        # Thread locks for shared data structures
+        self.results_lock = threading.Lock()
+        self.documents_lock = threading.Lock()
+        self.stats_lock = threading.Lock()
+        self.errors_lock = threading.Lock()
+    
+    def _calculate_optimal_workers(self, files: List[Path]) -> int:
+        """Calculate optimal number of workers based on file types and system resources"""
+        import multiprocessing
+        
+        # Count resource-intensive files
+        segy_files = len([f for f in files if f.suffix.lower() in ['.segy', '.sgy']])
+        large_csv_files = len([f for f in files if f.suffix.lower() == '.csv' and f.stat().st_size > 10*1024*1024])  # >10MB
+        
+        # Base workers on CPU cores, but consider resource-intensive files
+        cpu_cores = multiprocessing.cpu_count()
+        
+        # For resource-intensive files, use fewer workers to avoid memory issues
+        if segy_files > 0 or large_csv_files > 0:
+            max_workers = min(cpu_cores, 4)  # Limit to 4 workers for resource-intensive files
+        else:
+            max_workers = min(cpu_cores, 8)  # Use more workers for lighter files
+        
+        return max_workers
+    
+    def _parse_files_parallel(self, files: List[Path], max_workers: int):
+        """Process files in parallel with progress tracking"""
+        completed_files = 0
+        total_files = len(files)
+        
+        self.logger.info(f"🔄 Starting parallel processing of {total_files} files with {max_workers} workers")
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all files for processing
+            future_to_file = {
+                executor.submit(self._parse_single_file_thread_safe, file_path): file_path 
+                for file_path in files
+            }
+            
+            # Process completed futures with progress tracking
+            for future in as_completed(future_to_file):
+                file_path = future_to_file[future]
+                completed_files += 1
+                
+                try:
+                    # Get the result (this will raise any exceptions that occurred)
+                    result = future.result()
+                    
+                    # Log progress
+                    progress = (completed_files / total_files) * 100
+                    self.logger.info(f"📊 Progress: {completed_files}/{total_files} ({progress:.1f}%) - Completed: {file_path.name}")
+                    
+                except Exception as e:
+                    self.logger.error(f"❌ Error processing {file_path.name}: {e}")
+                    with self.errors_lock:
+                        self.error_files.append({
+                            'file': str(file_path),
+                            'error': str(e)
+                        })
+        
+        self.logger.info(f"✅ Parallel processing completed: {completed_files}/{total_files} files processed")
+    
+    def _parse_single_file_thread_safe(self, file_path: Path):
+        """Thread-safe version of single file parsing"""
+        try:
+            # Create appropriate parser
+            parser = self.parser_factory.create_parser(str(file_path))
+            
+            if parser is None:
+                self.logger.warning(f"❌ No parser found for: {file_path.name}")
+                with self.errors_lock:
+                    self.error_files.append({
+                        'file': str(file_path),
+                        'error': 'No suitable parser found'
+                    })
+                return None
+            
+            # Parse the file and generate contextual documents
+            result = parser.parse()
+            
+            # Thread-safe result storage
+            with self.results_lock:
+                self.parsed_results.append(result)
+            
+            with self.stats_lock:
+                self.parser_stats[result.parser_name] += 1
+            
+            # Log result
+            if result.error:
+                self.logger.error(f"❌ Error parsing {file_path.name}: {result.error}")
+                with self.errors_lock:
+                    self.error_files.append({
+                        'file': str(file_path),
+                        'error': result.error
+                    })
+            else:
+                self.logger.info(f"✅ Successfully parsed {file_path.name} with {result.parser_name}")
+                
+                # Generate contextual documents
+                contextual_docs = parser.generate_contextual_documents()
+                
+                # Thread-safe document storage
+                with self.documents_lock:
+                    self.contextual_documents.extend(contextual_docs)
+                
+                self.logger.info(f"📄 Generated {len(contextual_docs)} contextual documents from {file_path.name}")
+            
+            return result
+                
+        except Exception as e:
+            self.logger.error(f"❌ Unexpected error parsing {file_path.name}: {e}")
+            with self.errors_lock:
+                self.error_files.append({
+                    'file': str(file_path),
+                    'error': str(e)
+                })
+            return None
+    
     def _parse_single_file(self, file_path: Path):
-        """Parse a single file using appropriate parser"""
+        """Parse a single file using appropriate parser (sequential version for backward compatibility)"""
         self.logger.info(f"🔍 Processing: {file_path.name}")
         
         try:
@@ -137,6 +271,33 @@ class ModularDataParser:
                 'file': str(file_path),
                 'error': str(e)
             })
+    
+    def parse_all_data_sequential(self) -> Dict[str, Any]:
+        """Parse all data files using sequential processing (for comparison/testing)"""
+        start_time = time.time()
+        
+        self.logger.info("🚀 Starting sequential data parsing...")
+        self.logger.info(f"📁 Data path: {self.data_path}")
+        self.logger.info(f"📊 Output directory: {self.output_dir}")
+        
+        # Discover all files
+        all_files = self._discover_files()
+        self.logger.info(f"📋 Found {len(all_files)} files to process")
+        
+        # Parse each file and generate contextual documents
+        for file_path in all_files:
+            self._parse_single_file(file_path)
+        
+        # Generate summary
+        summary = self._generate_summary(start_time)
+        
+        # Save results
+        self._save_results(summary)
+        
+        # Save contextual documents
+        self._save_contextual_documents()
+        
+        return summary
     
     def _generate_summary(self, start_time: float) -> Dict[str, Any]:
         """Generate parsing summary"""

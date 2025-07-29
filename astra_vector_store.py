@@ -198,7 +198,7 @@ class AstraVectorStoreSingle:
                 documents_to_insert.append(astra_doc)
             
             # Insert documents in batches
-            batch_size = 10
+            batch_size = 100
             loaded_count = 0
             
             for i in range(0, len(documents_to_insert), batch_size):

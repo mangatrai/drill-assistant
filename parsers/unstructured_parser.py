@@ -30,6 +30,10 @@ class UnstructuredParser(BaseParser):
         if not self.validate_file():
             return False
             
+        # Skip macOS system files
+        if self.file_path.name == '.DS_Store':
+            return False
+            
         # Check file extension
         extension = self.file_path.suffix.lower()
         if extension and extension not in self.supported_extensions:
@@ -58,7 +62,13 @@ class UnstructuredParser(BaseParser):
             
             # Process document with Unstructured
             self.logger.info(f"Processing {self.file_path.name} with Unstructured SDK")
-            elements = partition(str(self.file_path))
+            
+            # Use text partitioner for ASC files, auto partitioner for others
+            if self.file_path.suffix.lower() in ['.asc', '.txt', '.dat', '.las']:
+                from unstructured.partition.text import partition_text
+                elements = partition_text(str(self.file_path))
+            else:
+                elements = partition(str(self.file_path))
             
             # Chunk by semantic sections
             chunks = chunk_by_title(elements)
