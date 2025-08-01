@@ -18,6 +18,9 @@ from astrapy.info import (
     CollectionDefinition,
     CollectionVectorOptions,
     VectorServiceOptions,
+    CollectionLexicalOptions,
+    CollectionRerankOptions,
+    RerankServiceOptions,
 )
 from dotenv import load_dotenv
 
@@ -32,6 +35,8 @@ class VectorSearchResult:
     document_type: str
     source: str
     similarity_score: float
+    rerank_score: float
+    vector_score: float
     id: str
 
 class AstraVectorStoreSingle:
@@ -77,8 +82,8 @@ class AstraVectorStoreSingle:
         self._initialize_collection()
     
     def _initialize_collection(self):
-        """Initialize the single collection in Astra DB with vectorize service"""
-        print("🔧 Initializing Astra DB collection with vectorize service...")
+        """Initialize the single collection in Astra DB with hybrid search support"""
+        print("🔧 Initializing Astra DB collection with hybrid search support...")
         
         try:
             # Check if collection exists using list_collection_names
@@ -89,7 +94,7 @@ class AstraVectorStoreSingle:
                 print(f"  ✅ Collection '{self.collection_name}' already exists")
             else:
                 print(f"  📝 Collection '{self.collection_name}' doesn't exist, creating...")
-                # Collection doesn't exist, create it with vectorize service
+                # Collection doesn't exist, create it with hybrid search support
                 collection_definition = CollectionDefinition(
                     vector=CollectionVectorOptions(
                         metric=VectorMetric.COSINE,
@@ -97,15 +102,35 @@ class AstraVectorStoreSingle:
                             provider="nvidia",
                             model_name="nvidia/nv-embedqa-e5-v5",
                         )
-                    )
+                    ),
+                    lexical=CollectionLexicalOptions(
+                        analyzer={
+                            "tokenizer": {"name": "standard", "args": {}},
+                            "filters": [
+                                {"name": "lowercase"},
+                                {"name": "stop"},
+                                {"name": "porterstem"},
+                                {"name": "asciifolding"},
+                            ],
+                            "charFilters": [],
+                        },
+                        enabled=True,
+                    ),
+                    rerank=CollectionRerankOptions(
+                        enabled=True,
+                        service=RerankServiceOptions(
+                            provider="nvidia",
+                            model_name="nvidia/llama-3.2-nv-rerankqa-1b-v2",
+                        ),
+                    ),
                 )
                 
-                print(f"  🏗️ Creating collection '{self.collection_name}' with vectorize service...")
+                print(f"  🏗️ Creating collection '{self.collection_name}' with hybrid search support...")
                 collection = self.database.create_collection(
                     self.collection_name,
                     definition=collection_definition,
                 )
-                print(f"  ✅ Created collection '{self.collection_name}' with vectorize service")
+                print(f"  ✅ Created collection '{self.collection_name}' with hybrid search support")
                 
         except Exception as e:
             print(f"  ❌ Error initializing collection '{self.collection_name}': {e}")
@@ -156,11 +181,11 @@ class AstraVectorStoreSingle:
             return False
     
     def _load_documents_to_collection(self, documents: List[Dict]) -> int:
-        """Load documents into the single collection using Astra's vectorize service"""
+        """Load documents into the single collection using Astra's hybrid search service"""
         try:
             collection = self.database.get_collection(self.collection_name)
             
-            # Prepare documents for insertion with $vectorize key and rich metadata
+            # Prepare documents for insertion with $hybrid key and rich metadata
             documents_to_insert = []
             for doc in documents:
                 # Generate a unique ID
@@ -185,14 +210,20 @@ class AstraVectorStoreSingle:
                     'tags': self._generate_tags_from_new_structure(doc, well_name)
                 }
                 
-                # Create document for Astra DB with vectorize service
+                # Prepare hybrid content with well name enhancement
+                if well_name:
+                    hybrid_content = f"{well_name} {doc['content']}"
+                else:
+                    hybrid_content = doc['content']
+                
+                # Create document for Astra DB with hybrid search support
                 astra_doc = {
                     "_id": doc_id,
                     "content": doc['content'],
                     "metadata": metadata,
                     "document_type": doc['document_type'],
                     "source": doc['source'],
-                    "$vectorize": doc['content']  # This is the key for Astra's vectorize service
+                    "$hybrid": hybrid_content  # Use $hybrid for both vector and lexical search
                 }
                 
                 documents_to_insert.append(astra_doc)
@@ -219,32 +250,9 @@ class AstraVectorStoreSingle:
             return 0
     
     def _extract_well_name_from_new_structure(self, doc: Dict) -> str:
-        """Extract well name from the new contextual document structure"""
-        # Try multiple extraction methods
-        
-        # Method 1: Extract from source path
-        source = doc.get('source', '')
-        if '15_9-F-' in source:
-            # Extract well name from path like "data/15_9-F-11 B/..."
-            parts = source.split('/')
-            for part in parts:
-                if '15_9-F-' in part:
-                    return part
-        
-        # Method 2: Extract from content if it contains well information
-        content = doc.get('content', '')
-        if 'WELL :' in content:
-            # Extract from content like "WELL : 15/9-F-11"
-            well_match = content.split('WELL :')[1].split('\n')[0].strip()
-            if well_match:
-                return well_match
-        
-        # Method 3: Extract from metadata
+        """Extract well name from metadata only - no path extraction hack"""
         metadata = doc.get('metadata', {})
-        if 'well_name' in metadata:
-            return metadata['well_name']
-        
-        return ""
+        return metadata.get('well_name', '')  # Only from metadata, no fallbacks
     
     def _extract_file_type_from_new_structure(self, doc: Dict) -> str:
         """Extract file type from the new structure"""
@@ -408,6 +416,62 @@ class AstraVectorStoreSingle:
             self.logger.error(f"❌ Error in document search: {e}")
             return []
     
+    def search_documents_hybrid(self, query: str, 
+                               document_types: List[str] = None,
+                               well_names: List[str] = None,
+                               tags: List[str] = None,
+                               limit: int = 5) -> List[VectorSearchResult]:
+        """Search documents using hybrid search (vector + lexical + reranking)"""
+        try:
+            collection = self.database.get_collection(self.collection_name)
+            
+            # Build filter based on metadata
+            filter_query = {}
+            
+            if document_types:
+                filter_query["document_type"] = {"$in": document_types}
+            
+            if well_names:
+                filter_query["metadata.well_name"] = {"$in": well_names}
+            
+            if tags:
+                filter_query["metadata.tags"] = {"$in": tags}
+            
+            # Use hybrid search with reranking
+            search_results = collection.find_and_rerank(
+                filter_query,  # Apply metadata filters
+                sort={"$hybrid": query},  # Hybrid search
+                limit=limit,
+                include_scores=True
+            )
+            
+            results = []
+            for result in search_results:
+                # Get scores from the result object
+                scores = result.scores
+                rerank_score = scores.get('$rerank', 0)
+                vector_score = scores.get('$vector', 0)
+                
+                # Get document data from result.document
+                document = result.document
+                search_result = VectorSearchResult(
+                    content=document.get('content', ''),
+                    metadata=document.get('metadata', {}),
+                    document_type=document.get('document_type', ''),
+                    source=document.get('source', ''),
+                    similarity_score=rerank_score,  # Use rerank score as primary similarity
+                    rerank_score=rerank_score,
+                    vector_score=vector_score,
+                    id=document.get('_id', '')
+                )
+                results.append(search_result)
+            
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error in hybrid search: {e}")
+            return []
+    
     def get_documents_by_well(self, well_name: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Get all documents related to a specific well"""
         try:
@@ -446,14 +510,14 @@ class AstraQueryEngineSingle:
         self.logger = logging.getLogger(self.__class__.__name__)
     
     def query(self, question: str, limit: int = 5) -> List[VectorSearchResult]:
-        """Query the vector store with intelligent collection selection"""
-        print(f"🔍 Querying: {question}")
+        """Query the vector store with hybrid search"""
+        print(f"🔍 Querying with hybrid search: {question}")
         
         # Analyze the question to determine what data types might be relevant
         relevant_types = self._analyze_query_requirements(question)
         
-        # Search with relevant document type filtering
-        results = self.vector_store.search_documents(
+        # Use hybrid search with relevant document type filtering
+        results = self.vector_store.search_documents_hybrid(
             query=question,
             document_types=relevant_types,
             limit=limit
@@ -462,7 +526,7 @@ class AstraQueryEngineSingle:
         # If no results with filtering, try broader search
         if not results:
             print(f"  🔄 No results with filtered search, trying broader search...")
-            results = self.vector_store.search_documents(
+            results = self.vector_store.search_documents_hybrid(
                 query=question,
                 limit=limit
             )
@@ -501,11 +565,11 @@ class AstraQueryEngineSingle:
         return list(set(relevant_types))  # Remove duplicates
     
     def query_well_comprehensive(self, well_name: str, limit: int = 10) -> List[VectorSearchResult]:
-        """Get comprehensive information about a specific well"""
+        """Get comprehensive information about a specific well using hybrid search"""
         print(f"🔍 Getting comprehensive data for well: {well_name}")
         
-        # Search for all documents related to this well
-        results = self.vector_store.search_documents(
+        # Search for all documents related to this well using hybrid search
+        results = self.vector_store.search_documents_hybrid(
             query=f"well {well_name}",
             well_names=[well_name],
             limit=limit
@@ -514,8 +578,8 @@ class AstraQueryEngineSingle:
         return results
     
     def query_cross_reference(self, question: str, well_name: str = None, limit: int = 5) -> List[VectorSearchResult]:
-        """Query with cross-referencing capabilities"""
-        print(f"🔍 Cross-reference query: {question}")
+        """Query with cross-referencing capabilities using hybrid search"""
+        print(f"🔍 Cross-reference query with hybrid search: {question}")
         
         # Build a more specific query
         if well_name:
@@ -523,8 +587,8 @@ class AstraQueryEngineSingle:
         else:
             enhanced_query = question
         
-        # Search across all document types
-        results = self.vector_store.search_documents(
+        # Search across all document types using hybrid search
+        results = self.vector_store.search_documents_hybrid(
             query=enhanced_query,
             limit=limit
         )
@@ -586,7 +650,7 @@ def main():
         print(f"   Found {len(results)} results")
         
         for i, result in enumerate(results, 1):
-            print(f"\n   {i}. {result.document_type} (Score: {result.similarity_score:.2f})")
+            print(f"\n   {i}. {result.document_type} (Rerank: {result.rerank_score:.2f}, Vector: {result.vector_score:.2f})")
             print(f"      Source: {result.source}")
             print(f"      Well: {result.metadata.get('well_name', 'N/A')}")
             print(f"      Content: {result.content[:200]}...")
